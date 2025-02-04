@@ -206,7 +206,7 @@ def scrape_selected_sheets():
     # Combine data
     combined_data = pd.concat(aligned_data, ignore_index=True)
     combined_data.fillna(0, inplace=True)
-    print("Combined Data:", combined_data)
+    print("Combined Data:", combined_data.columns)
 
     # Ensure required columns exist
     required_columns = ["Roll Number", "Name of the student", "Branch"] + target_columns
@@ -214,22 +214,41 @@ def scrape_selected_sheets():
         if column not in combined_data.columns:
             return jsonify({"error": f"Required column {column} is missing in sheets"}), 400
 
-    # Convert relevant columns to numeric, coerce errors to NaN (this prevents string concatenation with ints)
-    for col in target_columns:
-        combined_data[col] = pd.to_numeric(combined_data[col], errors='coerce').fillna(0)
-
     # Aggregation and ranking
     try:
-        aggregation_rules = {col: "sum" for col in target_columns}
-        print("Aggregation rules", aggregation_rules)
-        leaderboard = (
+        # Aggregate all numeric columns
+        aggregation_rules = {col: "sum" for col in combined_data.columns if col not in ["Roll Number", "Name of the student", "Branch"]}
+        print("Aggregation rules:", aggregation_rules)
+
+        # Group by required fields and aggregate all columns
+        leaderboard_full = (
             combined_data.groupby(["Roll Number", "Name of the student", "Branch"])
             .agg(aggregation_rules)
             .reset_index()
         )
 
-        
+        def compute_java_score(row):
+            if row["Have you did problems in coding bat java"].strip().lower() == "yes":
+                java_threads = [f"No.of problems solved in java thread {i}" for i in range(1, 18)]
+                return sum(3 if 0 < row.get(thread, 0) < 5 else 5 for thread in java_threads if row.get(thread, 0) > 0)
+            return 0
 
+# 🟢 Compute Python Score
+        def compute_python_score(row):
+            if row["Have you did problems in coding bat python"].strip().lower() == "yes":
+                python_threads = [f"No.of problems solved in python thread {i}" for i in range(1, 9)]
+                return sum(3 if 0 < row.get(thread, 0) < 5 else 5 for thread in python_threads if row.get(thread, 0) > 0)
+            return 0
+
+        # Add computed scores to leaderboard
+        leaderboard_full["Coding bat Java Total Score"] = leaderboard_full.apply(compute_java_score, axis=1)
+        leaderboard_full["Coding bat Python Total Score"] = leaderboard_full.apply(compute_python_score, axis=1)
+        print(leaderboard_full["Java Total Score"].values)
+        print(leaderboard_full["Python Total Score"].values)
+
+        # Select only required columns for final leaderboard
+        final_columns = ["Roll Number", "Name of the student", "Branch"] + target_columns + ["Java Total Score", "Python Total Score"]
+        leaderboard = leaderboard_full[final_columns]
 
         # 🏅 Final Total Score
         leaderboard["Total Score"] = leaderboard[target_columns + ["Java Total Score", "Python Total Score"]].sum(axis=1)
@@ -252,14 +271,6 @@ def scrape_selected_sheets():
     print("Leaderboard:", leaderboard)
     return leaderboard.to_json(orient='records')
 
-
-
-
-
-
-
-
-      # Collection name
 
 # Add a new sheet
 @app.route('/addSheet', methods=['POST'])
